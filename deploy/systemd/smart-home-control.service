@@ -1,14 +1,23 @@
 [Unit]
 Description=Smart Home Control Gunicorn Service
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
-WorkingDirectory=/opt/smart_home_control/backend
-EnvironmentFile=/opt/smart_home_control/backend/.env
-ExecStart=/opt/smart_home_control/backend/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:28681 --access-logfile - --error-logfile - wsgi:app
+
+# Template values to replace on a new host:
+# __APP_USER__
+# __APP_GROUP__
+# __BACKEND_DIR__
+# __WEB_PORT__
+# __GUNICORN_WORKERS__
+User=__APP_USER__
+Group=__APP_GROUP__
+WorkingDirectory=__BACKEND_DIR__
+EnvironmentFile=__BACKEND_DIR__/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__BACKEND_DIR__/.venv/bin/gunicorn --workers __GUNICORN_WORKERS__ --bind 127.0.0.1:__WEB_PORT__ --access-logfile - --error-logfile - wsgi:app
 Restart=always
 RestartSec=3
 

@@ -5,13 +5,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 SERVICE_NAME="smart-home-control"
-PUBLIC_HOST="${PUBLIC_HOST:-122.51.219.147}"
+DEPLOY_DIR="$ROOT_DIR/deploy"
+SYSTEMD_TEMPLATE="$DEPLOY_DIR/systemd/${SERVICE_NAME}.service"
+NGINX_TEMPLATE="$DEPLOY_DIR/nginx/smart_home_control.conf"
+PUBLIC_HOST="${PUBLIC_HOST:-your-host-or-ip}"
 WEB_PORT="${WEB_PORT:-28681}"
 SUBPATH="${SUBPATH:-/smart-home/}"
 NGINX_SITE_FILE="${NGINX_SITE_FILE:-}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 APP_USER="${APP_USER:-${SUDO_USER:-$(id -un)}}"
 APP_GROUP="${APP_GROUP:-$(id -gn "$APP_USER")}"
+APP_WORKERS="${APP_WORKERS:-2}"
 
 run_root() {
     if [ "$(id -u)" -eq 0 ]; then
@@ -23,7 +27,14 @@ run_root() {
 
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
-        echo "缺少命令: $1"
+        echo "Missing required command: $1"
+        exit 1
+    fi
+}
+
+require_file() {
+    if [ ! -f "$1" ]; then
+        echo "Missing required file: $1"
         exit 1
     fi
 }
@@ -57,6 +68,42 @@ normalize_subpath() {
     printf '%s\n' "$raw"
 }
 
+escape_sed_replacement() {
+    printf '%s' "$1" | sed -e 's/[&|]/\\&/g'
+}
+
+render_template_to_root() {
+    local template_file="$1"
+    local output_file="$2"
+    local smart_home_path="${SUBPATH%/}"
+    local escaped_app_user
+    local escaped_app_group
+    local escaped_backend_dir
+    local escaped_web_port
+    local escaped_workers
+    local escaped_subpath
+    local escaped_smart_home_path
+
+    escaped_app_user="$(escape_sed_replacement "$APP_USER")"
+    escaped_app_group="$(escape_sed_replacement "$APP_GROUP")"
+    escaped_backend_dir="$(escape_sed_replacement "$BACKEND_DIR")"
+    escaped_web_port="$(escape_sed_replacement "$WEB_PORT")"
+    escaped_workers="$(escape_sed_replacement "$APP_WORKERS")"
+    escaped_subpath="$(escape_sed_replacement "$SUBPATH")"
+    escaped_smart_home_path="$(escape_sed_replacement "$smart_home_path")"
+
+    sed \
+        -e "s|__APP_USER__|$escaped_app_user|g" \
+        -e "s|__APP_GROUP__|$escaped_app_group|g" \
+        -e "s|__BACKEND_DIR__|$escaped_backend_dir|g" \
+        -e "s|__WEB_PORT__|$escaped_web_port|g" \
+        -e "s|__GUNICORN_WORKERS__|$escaped_workers|g" \
+        -e "s|__SMART_HOME_PATH__|$escaped_smart_home_path|g" \
+        -e "s|__SMART_HOME_SUBPATH__|$escaped_subpath|g" \
+        -e "s|__SMART_HOME_PORT__|$escaped_web_port|g" \
+        "$template_file" | run_root tee "$output_file" >/dev/null
+}
+
 detect_nginx_site_file() {
     local candidate
 
@@ -84,27 +131,9 @@ install_nginx_include() {
     local snippet_file="/etc/nginx/snippets/${SERVICE_NAME}.conf"
     local include_line="    include ${snippet_file};"
     local temp_file
-    local subpath_trimmed="${SUBPATH%/}"
 
     run_root mkdir -p /etc/nginx/snippets
-
-    run_root tee "$snippet_file" >/dev/null <<EOF
-location = ${subpath_trimmed} {
-    return 301 ${SUBPATH};
-}
-
-location ${SUBPATH} {
-    proxy_pass http://127.0.0.1:${WEB_PORT}/;
-    proxy_http_version 1.1;
-    proxy_set_header Host \$host;
-    proxy_set_header X-Real-IP \$remote_addr;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$scheme;
-    proxy_set_header X-Forwarded-Host \$host;
-    proxy_set_header X-Forwarded-Port \$server_port;
-    proxy_read_timeout 30s;
-}
-EOF
+    render_template_to_root "$NGINX_TEMPLATE" "$snippet_file"
 
     if grep -Fq "$snippet_file" "$site_file"; then
         return 0
@@ -128,8 +157,8 @@ EOF
         }
     ' "$site_file" >"$temp_file"; then
         rm -f "$temp_file"
-        echo "没有在 $site_file 里找到可插入 include 的 server 块。"
-        echo "请手动把 /etc/nginx/snippets/${SERVICE_NAME}.conf include 到现有 server 配置中。"
+        echo "Could not find a server block in $site_file for auto-inserting the include."
+        echo "Please add /etc/nginx/snippets/${SERVICE_NAME}.conf to the correct server block manually."
         exit 1
     fi
 
@@ -144,6 +173,8 @@ require_cmd systemctl
 require_cmd grep
 require_cmd sed
 require_cmd awk
+require_file "$SYSTEMD_TEMPLATE"
+require_file "$NGINX_TEMPLATE"
 
 if [ "$(id -u)" -ne 0 ]; then
     require_cmd sudo
@@ -152,19 +183,19 @@ fi
 SUBPATH="$(normalize_subpath "$SUBPATH")"
 
 if [ ! -d "$BACKEND_DIR" ]; then
-    echo "找不到 backend 目录: $BACKEND_DIR"
+    echo "Could not find backend directory: $BACKEND_DIR"
     exit 1
 fi
 
 if [ ! -f "$BACKEND_DIR/.env" ]; then
     cp "$BACKEND_DIR/.env.example" "$BACKEND_DIR/.env"
-    echo "已创建 $BACKEND_DIR/.env"
-    echo "请先把 MQTT_HOST / MQTT_USERNAME / MQTT_PASSWORD 改成你的真实配置，然后重新执行本脚本。"
+    echo "Created $BACKEND_DIR/.env"
+    echo "Please update MQTT_HOST, MQTT_USERNAME, and MQTT_PASSWORD, then rerun this script."
     exit 1
 fi
 
 if grep -Eq '^MQTT_HOST=your-emqx-host$|^MQTT_USERNAME=your-mqtt-username$|^MQTT_PASSWORD=your-mqtt-password$' "$BACKEND_DIR/.env"; then
-    echo "$BACKEND_DIR/.env 里还是示例占位值，请先修改为真实 MQTT 配置后再执行。"
+    echo "$BACKEND_DIR/.env still contains placeholder MQTT values. Update them before rerunning."
     exit 1
 fi
 
@@ -182,29 +213,11 @@ set_env_value "WEB_DEBUG" "0"
 set_env_value "WEB_PROXY_FIX" "1"
 
 SYSTEMD_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-
-run_root tee "$SYSTEMD_FILE" >/dev/null <<EOF
-[Unit]
-Description=Smart Home Control Gunicorn Service
-After=network.target
-
-[Service]
-Type=simple
-User=$APP_USER
-Group=$APP_GROUP
-WorkingDirectory=$BACKEND_DIR
-EnvironmentFile=$BACKEND_DIR/.env
-ExecStart=$BACKEND_DIR/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:$WEB_PORT --access-logfile - --error-logfile - wsgi:app
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
+render_template_to_root "$SYSTEMD_TEMPLATE" "$SYSTEMD_FILE"
 
 if ! NGINX_SITE_FILE="$(detect_nginx_site_file)"; then
-    echo "没有自动找到 Nginx 站点文件。"
-    echo "请设置 NGINX_SITE_FILE=/etc/nginx/sites-available/<你的站点文件> 后重新执行。"
+    echo "Could not detect an nginx site file automatically."
+    echo "Set NGINX_SITE_FILE=/etc/nginx/sites-available/<your-site-file> and rerun."
     exit 1
 fi
 
@@ -221,10 +234,10 @@ if command -v curl >/dev/null 2>&1; then
 fi
 
 echo
-echo "部署完成。"
-echo "应用目录: $ROOT_DIR"
-echo "后端目录: $BACKEND_DIR"
-echo "systemd 服务: $SERVICE_NAME"
-echo "Nginx 站点文件: $NGINX_SITE_FILE"
-echo "内部监听: http://127.0.0.1:$WEB_PORT"
-echo "公网访问: http://$PUBLIC_HOST${SUBPATH}"
+echo "Deployment complete."
+echo "Project directory: $ROOT_DIR"
+echo "Backend directory: $BACKEND_DIR"
+echo "systemd service: $SERVICE_NAME"
+echo "Nginx site file: $NGINX_SITE_FILE"
+echo "Local health check: http://127.0.0.1:$WEB_PORT/api/health"
+echo "Public entry point: http://$PUBLIC_HOST${SUBPATH}"
