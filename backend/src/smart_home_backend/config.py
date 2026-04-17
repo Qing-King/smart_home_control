@@ -102,6 +102,7 @@ class WebSettings:
     host: str
     port: int
     debug: bool
+    proxy_fix: bool
 
     @classmethod
     def from_env(cls) -> "WebSettings":
@@ -110,4 +111,5 @@ class WebSettings:
             host=os.getenv("WEB_HOST", "0.0.0.0").strip() or "0.0.0.0",
             port=int(os.getenv("WEB_PORT", "28681")),
             debug=read_bool_env("WEB_DEBUG", False),
+            proxy_fix=read_bool_env("WEB_PROXY_FIX", True),
         )

@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 
-from .config import MQTTSettings
+from .config import MQTTSettings, WebSettings
 from .controller import MqttDeviceController, StatusPacket
 
 ALLOWED_COMMANDS = {"on", "off", "toggle", "status"}
@@ -27,6 +28,10 @@ def serialize_status(packet: StatusPacket | None) -> dict[str, Any] | None:
 
 def create_app() -> Flask:
     app = Flask(__name__, static_folder=None)
+    web_settings = WebSettings.from_env()
+
+    if web_settings.proxy_fix:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
     @app.get("/api/health")
     def health() -> tuple[dict[str, Any], int]:
@@ -37,6 +42,7 @@ def create_app() -> Flask:
                 "service": "smart-home-control",
                 "mqtt_topic_root": settings.topic_root,
                 "web_root": "/",
+                "proxy_fix": web_settings.proxy_fix,
             },
             200,
         )
