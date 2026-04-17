@@ -116,24 +116,38 @@ python3 -m pip install -r requirements.txt
 .venv/bin/gunicorn --workers 2 --bind 127.0.0.1:28681 wsgi:app
 ```
 
-### 3. 配置 Nginx
+### 3. 配置 Nginx 子路径代理
 
 示例文件已经放在：
 
 - `../deploy/nginx/smart_home_control.conf`
 
-把里面的：
+这个文件现在不是完整站点，而是一个 `location` 片段，应该被放进你当前正在服务 `122.51.219.147` 的那个 `server {}` 里。
 
-```nginx
-server_name smart-home.example.com;
-```
-
-改成你的域名，然后链接到 Nginx 配置目录，例如：
+如果你手动配置，可以把下面这段加进现有 Nginx 站点：
 
 ```bash
-sudo ln -s /opt/smart_home_control/deploy/nginx/smart_home_control.conf /etc/nginx/sites-enabled/smart_home_control.conf
-sudo nginx -t
-sudo systemctl reload nginx
+location = /smart-home {
+    return 301 /smart-home/;
+}
+
+location /smart-home/ {
+    proxy_pass http://127.0.0.1:28681/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Port $server_port;
+    proxy_read_timeout 30s;
+}
+```
+
+配置完成后，可以直接访问：
+
+```text
+http://122.51.219.147/smart-home/
 ```
 
 ### 4. 配置 systemd
@@ -162,7 +176,7 @@ sudo systemctl status smart-home-control --no-pager
 ## 部署提示
 
 - 如果走 Nginx 反向代理，通常不需要对公网放行 `28681/TCP`
+- 如果你现在只有公网 IP，推荐直接用 `http://122.51.219.147/smart-home/`
 - 只需要让 Gunicorn 监听 `127.0.0.1:28681`
 - 如果要改内部端口，可以修改 `backend/.env` 里的 `WEB_PORT`
 - 如果 `/opt/smart_home_control` 不是 `www-data` 可读，请按你的服务器用户调整 `smart-home-control.service`
-- 如果你后面想挂在同一个域名的子路径下，比如 `/smart-home/`，我也可以继续帮你改

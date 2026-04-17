@@ -7,6 +7,7 @@ const deviceReason = document.getElementById("device-reason");
 const deviceClientId = document.getElementById("device-client-id");
 const refreshButton = document.getElementById("refresh-button");
 const commandButtons = document.querySelectorAll("[data-command]");
+const apiBaseUrl = new URL("api/", window.location.href);
 
 function setBusy(isBusy) {
   refreshButton.disabled = isBusy;
@@ -62,7 +63,7 @@ async function callApi(url, options = {}) {
 async function fetchStatus() {
   setBusy(true);
   try {
-    const data = await callApi("/api/device/status");
+    const data = await callApi(new URL("device/status", apiBaseUrl));
     setStatusPill(true, "设备在线，状态已更新");
     updateDeviceInfo(data);
     writeLog(data);
@@ -77,7 +78,7 @@ async function fetchStatus() {
 async function sendCommand(command) {
   setBusy(true);
   try {
-    const data = await callApi("/api/device/command", {
+    const data = await callApi(new URL("device/command", apiBaseUrl), {
       method: "POST",
       body: JSON.stringify({ command, wait_for_status: true }),
     });
