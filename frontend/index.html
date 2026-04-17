@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Smart Home Control</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="panel hero">
+        <p class="eyebrow">Smart Home Control</p>
+        <h1>家庭设备控制台</h1>
+        <p class="subtitle">
+          这个页面会调用 Python 后端，再由后端通过 MQTT 把控制命令发到 EMQX 和 ESP8266。
+        </p>
+        <div class="status-strip">
+          <span class="dot" id="status-dot"></span>
+          <span id="status-text">等待连接设备...</span>
+        </div>
+      </section>
+
+      <section class="panel controls">
+        <div class="panel-head">
+          <h2>设备开关</h2>
+          <button id="refresh-button" class="button ghost" type="button">刷新状态</button>
+        </div>
+
+        <div class="button-grid">
+          <button data-command="on" class="button primary" type="button">打开</button>
+          <button data-command="off" class="button danger" type="button">关闭</button>
+          <button data-command="toggle" class="button accent" type="button">切换</button>
+          <button data-command="status" class="button ghost" type="button">查询状态</button>
+        </div>
+
+        <dl class="info-grid">
+          <div>
+            <dt>设备状态</dt>
+            <dd id="device-led">未知</dd>
+          </div>
+          <div>
+            <dt>设备 IP</dt>
+            <dd id="device-ip">-</dd>
+          </div>
+          <div>
+            <dt>回包原因</dt>
+            <dd id="device-reason">-</dd>
+          </div>
+          <div>
+            <dt>客户端 ID</dt>
+            <dd id="device-client-id">-</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel log-panel">
+        <div class="panel-head">
+          <h2>返回日志</h2>
+        </div>
+        <pre id="log-output" class="log-output">等待操作...</pre>
+      </section>
+    </main>
+
+    <script src="/assets/app.js"></script>
+  </body>
+</html>
