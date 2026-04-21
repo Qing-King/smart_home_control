@@ -64,6 +64,29 @@
 python3 control_device.py on --no-wait
 ```
 
+## Windows 本机启动
+
+如果你是在 Windows 上开发，可以直接用仓库里现成的 PowerShell 脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start_windows.ps1
+```
+
+这个脚本会自动：
+
+- 创建 `backend/.venv`
+- 从 `.env.example` 生成 `.env`
+- 安装或更新依赖
+- 启动 `run_web.py`
+
+如果你只想先准备环境、不立即启动服务，可以用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start_windows.ps1 -SkipRun
+```
+
+Windows 下的固件工程已经整理到 `../firmware/esp8266/wifi_http_demo/`，使用前请把后端 `.env` 和固件 MQTT 配置对齐。
+
 ## 启动网页控制端
 
 默认 Web 服务会监听不常用端口 `28681`。

@@ -1,0 +1,78 @@
+menu "WiFi MQTT Demo Network Configuration"
+    config WIFI_HTTP_DEMO_STATIC_IP
+        string "Static STA IPv4 address"
+        default "192.168.2.100"
+        help
+            Fixed IPv4 address used by the ESP8266 station interface.
+
+    config WIFI_HTTP_DEMO_STATIC_NETMASK
+        string "Static STA netmask"
+        default "255.255.255.0"
+        help
+            Netmask used together with the fixed station IPv4 address.
+
+    config WIFI_HTTP_DEMO_STATIC_GATEWAY
+        string "Static STA gateway"
+        default "192.168.2.1"
+        help
+            Default gateway used by the fixed station IPv4 address.
+
+    config WIFI_HTTP_DEMO_STATIC_DNS_MAIN
+        string "Static STA primary DNS"
+        default "192.168.2.1"
+        help
+            Primary DNS server used when DHCP is disabled.
+
+    config WIFI_HTTP_DEMO_STATIC_DNS_BACKUP
+        string "Static STA backup DNS"
+        default "8.8.8.8"
+        help
+            Backup DNS server used when DHCP is disabled.
+endmenu
+
+menu "WiFi MQTT Demo LED Configuration"
+    config WIFI_HTTP_DEMO_LED_GPIO
+        int "LED GPIO"
+        range 0 16
+        default 2
+        help
+            GPIO used for the NodeMCU onboard LED. Many ESP8266 NodeMCU boards use GPIO2.
+
+    config WIFI_HTTP_DEMO_LED_ACTIVE_LOW
+        bool "LED is active low"
+        default y
+        help
+            Enable this if the LED turns on when the GPIO output is low.
+endmenu
+
+menu "WiFi MQTT Demo MQTT Configuration"
+    config WIFI_HTTP_DEMO_MQTT_URI
+        string "MQTT broker URI"
+        default "mqtts://your-emqx-host:8883"
+        help
+            Full MQTT URI used by the ESP8266 MQTT client.
+
+    config WIFI_HTTP_DEMO_MQTT_USERNAME
+        string "MQTT username"
+        default "your-mqtt-username"
+        help
+            Username used when connecting to the MQTT broker.
+
+    config WIFI_HTTP_DEMO_MQTT_PASSWORD
+        string "MQTT password"
+        default "your-mqtt-password"
+        help
+            Password used when connecting to the MQTT broker.
+
+    config WIFI_HTTP_DEMO_MQTT_TOPIC_ROOT
+        string "MQTT topic root"
+        default "nodemcu"
+        help
+            Base topic prefix used to derive the command and status topics.
+
+    config WIFI_HTTP_DEMO_MQTT_CLIENT_ID_PREFIX
+        string "MQTT client ID prefix"
+        default "esp8266-nodemcu"
+        help
+            A MAC-derived suffix is appended automatically to keep the client ID unique.
+endmenu
