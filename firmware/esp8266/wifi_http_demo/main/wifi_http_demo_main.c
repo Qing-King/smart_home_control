@@ -1,6 +1,8 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <strings.h>
 #include <string.h>
 
@@ -9,6 +11,8 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "mqtt_client.h"
 #include "sdkconfig.h"
 #include "lwip/ip_addr.h"
@@ -18,34 +22,55 @@
 
 #define MQTT_TOPIC_BUFFER_SIZE 128
 #define MQTT_CLIENT_ID_BUFFER_SIZE 48
-#define MQTT_MESSAGE_BUFFER_SIZE 192
+#define MQTT_MESSAGE_BUFFER_SIZE 384
+#define CYCLE_TASK_STACK_SIZE 3072
+#define CYCLE_TASK_PRIORITY 5
 
 static const char *TAG = "wifi_mqtt_demo";
-static bool s_led_is_on = false;
+static bool s_device_is_on = false;
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
 static char s_mqtt_client_id[MQTT_CLIENT_ID_BUFFER_SIZE];
 static char s_mqtt_command_topic[MQTT_TOPIC_BUFFER_SIZE];
 static char s_mqtt_status_topic[MQTT_TOPIC_BUFFER_SIZE];
 static const char *OFFLINE_LWT = "{\"status\":\"offline\"}";
+static volatile bool s_cycle_active = false;
+static volatile bool s_cycle_stop_requested = false;
+static volatile bool s_cycle_stop_final_off = true;
+static volatile uint32_t s_cycle_generation = 0;
+
+typedef struct {
+    uint64_t total_ms;
+    uint64_t on_ms;
+    uint64_t off_ms;
+    uint32_t generation;
+} cycle_task_params_t;
 
 extern const uint8_t digicert_global_root_g2_pem_start[] asm("_binary_digicert_global_root_g2_pem_start");
 
-static void set_led_state(bool on)
+static void set_device_state(bool on)
 {
-    uint32_t output_level = on ? 1 : 0;
+    uint32_t device_output_level = on ? 1 : 0;
+    uint32_t indicator_output_level = on ? 1 : 0;
 
-#ifdef CONFIG_WIFI_HTTP_DEMO_LED_ACTIVE_LOW
-    output_level = on ? 0 : 1;
+#ifdef CONFIG_WIFI_HTTP_DEMO_DEVICE_ACTIVE_LOW
+    device_output_level = on ? 0 : 1;
 #endif
 
-    ESP_ERROR_CHECK(gpio_set_level(CONFIG_WIFI_HTTP_DEMO_LED_GPIO, output_level));
-    s_led_is_on = on;
+#ifdef CONFIG_WIFI_HTTP_DEMO_INDICATOR_LED_ACTIVE_LOW
+    indicator_output_level = on ? 0 : 1;
+#endif
+
+    ESP_ERROR_CHECK(gpio_set_level(CONFIG_WIFI_HTTP_DEMO_DEVICE_GPIO, device_output_level));
+    ESP_ERROR_CHECK(gpio_set_level(CONFIG_WIFI_HTTP_DEMO_INDICATOR_LED_GPIO,
+                                   indicator_output_level));
+    s_device_is_on = on;
 }
 
-static void configure_led(void)
+static void configure_device_output(void)
 {
     gpio_config_t io_conf = {
-        .pin_bit_mask = BIT(CONFIG_WIFI_HTTP_DEMO_LED_GPIO),
+        .pin_bit_mask = BIT(CONFIG_WIFI_HTTP_DEMO_DEVICE_GPIO)
+                        | BIT(CONFIG_WIFI_HTTP_DEMO_INDICATOR_LED_GPIO),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -53,10 +78,18 @@ static void configure_led(void)
     };
 
     ESP_ERROR_CHECK(gpio_config(&io_conf));
-    set_led_state(false);
-    ESP_LOGI(TAG, "LED configured on GPIO%d (%s)",
-             CONFIG_WIFI_HTTP_DEMO_LED_GPIO,
-#ifdef CONFIG_WIFI_HTTP_DEMO_LED_ACTIVE_LOW
+    set_device_state(false);
+    ESP_LOGI(TAG, "Device output configured on GPIO%d (%s)",
+             CONFIG_WIFI_HTTP_DEMO_DEVICE_GPIO,
+#ifdef CONFIG_WIFI_HTTP_DEMO_DEVICE_ACTIVE_LOW
+             "active-low"
+#else
+             "active-high"
+#endif
+    );
+    ESP_LOGI(TAG, "Indicator LED configured on GPIO%d (%s)",
+             CONFIG_WIFI_HTTP_DEMO_INDICATOR_LED_GPIO,
+#ifdef CONFIG_WIFI_HTTP_DEMO_INDICATOR_LED_ACTIVE_LOW
              "active-low"
 #else
              "active-high"
@@ -208,6 +241,16 @@ static bool copy_event_string(char *destination, size_t destination_size,
     return true;
 }
 
+static uint64_t monotonic_millis(void)
+{
+    return (uint64_t) xTaskGetTickCount() * portTICK_PERIOD_MS;
+}
+
+static bool cycle_should_continue(uint32_t generation)
+{
+    return s_cycle_generation == generation && !s_cycle_stop_requested;
+}
+
 static void publish_status(esp_mqtt_client_handle_t client, const char *reason)
 {
     char ip_string[16] = { 0 };
@@ -220,11 +263,15 @@ static void publish_status(esp_mqtt_client_handle_t client, const char *reason)
     }
 
     written = snprintf(payload, sizeof(payload),
-                       "{\"client_id\":\"%s\",\"led\":\"%s\",\"ip\":\"%s\",\"reason\":\"%s\",\"status\":\"online\"}",
+                       "{\"client_id\":\"%s\",\"led\":\"%s\",\"device\":\"%s\",\"device_gpio\":%d,\"indicator_gpio\":%d,\"ip\":\"%s\",\"reason\":\"%s\",\"status\":\"online\",\"cycle_active\":%s}",
                        s_mqtt_client_id,
-                       s_led_is_on ? "on" : "off",
+                       s_device_is_on ? "on" : "off",
+                       s_device_is_on ? "on" : "off",
+                       CONFIG_WIFI_HTTP_DEMO_DEVICE_GPIO,
+                       CONFIG_WIFI_HTTP_DEMO_INDICATOR_LED_GPIO,
                        ip_string,
-                       reason);
+                       reason,
+                       s_cycle_active ? "true" : "false");
     if (written < 0 || written >= sizeof(payload)) {
         ESP_LOGE(TAG, "MQTT status payload truncated");
         return;
@@ -234,25 +281,245 @@ static void publish_status(esp_mqtt_client_handle_t client, const char *reason)
     ESP_LOGI(TAG, "Published status, msg_id=%d payload=%s", msg_id, payload);
 }
 
+static void publish_status_if_available(const char *reason)
+{
+    if (s_mqtt_client == NULL) {
+        return;
+    }
+
+    publish_status(s_mqtt_client, reason);
+}
+
+static void cycle_task(void *task_params)
+{
+    cycle_task_params_t params = *(cycle_task_params_t *) task_params;
+    uint64_t started_at;
+    uint64_t ends_at;
+    uint64_t phase_started_at;
+    bool phase_on = true;
+    bool completed = false;
+
+    free(task_params);
+
+    set_device_state(true);
+    publish_status_if_available("cycle_started");
+
+    started_at = monotonic_millis();
+    ends_at = started_at + params.total_ms;
+    phase_started_at = started_at;
+
+    while (cycle_should_continue(params.generation)) {
+        uint64_t now = monotonic_millis();
+        uint64_t phase_ms = phase_on ? params.on_ms : params.off_ms;
+        uint64_t phase_deadline = phase_started_at + phase_ms;
+
+        if (now >= ends_at) {
+            completed = true;
+            break;
+        }
+
+        if (phase_deadline > ends_at) {
+            phase_deadline = ends_at;
+        }
+
+        while (cycle_should_continue(params.generation)) {
+            uint64_t remaining_ms;
+            TickType_t delay_ticks;
+
+            now = monotonic_millis();
+            if (now >= phase_deadline) {
+                break;
+            }
+
+            remaining_ms = phase_deadline - now;
+            if (remaining_ms > 1000) {
+                remaining_ms = 1000;
+            }
+
+            delay_ticks = pdMS_TO_TICKS((uint32_t) remaining_ms);
+            vTaskDelay(delay_ticks > 0 ? delay_ticks : 1);
+        }
+
+        if (!cycle_should_continue(params.generation)) {
+            break;
+        }
+
+        now = monotonic_millis();
+        if (now >= ends_at) {
+            completed = true;
+            break;
+        }
+
+        phase_on = !phase_on;
+        set_device_state(phase_on);
+        publish_status_if_available(phase_on ? "cycle_on" : "cycle_off");
+        phase_started_at = now;
+    }
+
+    if (s_cycle_generation == params.generation) {
+        const bool stopped = s_cycle_stop_requested;
+        const bool final_off = completed || s_cycle_stop_final_off;
+
+        if (final_off) {
+            set_device_state(false);
+        }
+
+        s_cycle_active = false;
+        s_cycle_stop_requested = false;
+        s_cycle_stop_final_off = true;
+
+        if (completed) {
+            publish_status_if_available("cycle_completed");
+        } else if (stopped && final_off) {
+            publish_status_if_available("cycle_stopped");
+        } else if (stopped) {
+            publish_status_if_available("cycle_cancelled");
+        }
+    }
+
+    vTaskDelete(NULL);
+}
+
+static void request_cycle_stop(bool final_off)
+{
+    if (!s_cycle_active) {
+        return;
+    }
+
+    s_cycle_stop_final_off = final_off;
+    s_cycle_stop_requested = true;
+}
+
+static bool start_cycle_task(uint64_t total_ms, uint64_t on_ms, uint64_t off_ms)
+{
+    cycle_task_params_t *params;
+
+    if (total_ms == 0 || on_ms == 0 || off_ms == 0) {
+        ESP_LOGW(TAG, "Ignoring invalid cycle timings");
+        return false;
+    }
+
+    ++s_cycle_generation;
+    s_cycle_active = true;
+    s_cycle_stop_requested = false;
+    s_cycle_stop_final_off = true;
+
+    params = malloc(sizeof(*params));
+    if (params == NULL) {
+        ESP_LOGE(TAG, "Unable to allocate cycle task params");
+        s_cycle_active = false;
+        return false;
+    }
+
+    params->total_ms = total_ms;
+    params->on_ms = on_ms;
+    params->off_ms = off_ms;
+    params->generation = s_cycle_generation;
+
+    if (xTaskCreate(cycle_task, "light-cycle", CYCLE_TASK_STACK_SIZE, params,
+                    CYCLE_TASK_PRIORITY, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Unable to create cycle task");
+        free(params);
+        s_cycle_active = false;
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Cycle started locally: total=%llums on=%llums off=%llums",
+             (unsigned long long) total_ms,
+             (unsigned long long) on_ms,
+             (unsigned long long) off_ms);
+    return true;
+}
+
+static bool parse_cycle_start_command(const char *command,
+                                      uint64_t *total_ms,
+                                      uint64_t *on_ms,
+                                      uint64_t *off_ms)
+{
+    const char *prefix = "cycle:start:";
+    const char *cursor;
+    char *end;
+    unsigned long long parsed_total;
+    unsigned long long parsed_on;
+    unsigned long long parsed_off;
+
+    if (strncmp(command, prefix, strlen(prefix)) != 0) {
+        return false;
+    }
+
+    cursor = command + strlen(prefix);
+    parsed_total = strtoull(cursor, &end, 10);
+    if (end == cursor || *end != ':') {
+        return false;
+    }
+
+    cursor = end + 1;
+    parsed_on = strtoull(cursor, &end, 10);
+    if (end == cursor || *end != ':') {
+        return false;
+    }
+
+    cursor = end + 1;
+    parsed_off = strtoull(cursor, &end, 10);
+    if (end == cursor || *end != '\0') {
+        return false;
+    }
+
+    *total_ms = (uint64_t) parsed_total;
+    *on_ms = (uint64_t) parsed_on;
+    *off_ms = (uint64_t) parsed_off;
+    return true;
+}
+
 static void handle_command(esp_mqtt_client_handle_t client, const char *command)
 {
+    uint64_t total_ms;
+    uint64_t on_ms;
+    uint64_t off_ms;
+
+    if (parse_cycle_start_command(command, &total_ms, &on_ms, &off_ms)) {
+        if (start_cycle_task(total_ms, on_ms, off_ms)) {
+            publish_status(client, "cmd_cycle_start");
+        } else {
+            publish_status(client, "cmd_cycle_start_failed");
+        }
+        return;
+    }
+
+    if (strcasecmp(command, "cycle:stop") == 0) {
+        request_cycle_stop(true);
+        ESP_LOGI(TAG, "Cycle stop requested from MQTT");
+        publish_status(client, "cmd_cycle_stop");
+        return;
+    }
+
+    if (strcasecmp(command, "cycle:cancel") == 0) {
+        request_cycle_stop(false);
+        ESP_LOGI(TAG, "Cycle cancel requested from MQTT");
+        publish_status(client, "cmd_cycle_cancel");
+        return;
+    }
+
     if (strcasecmp(command, "on") == 0) {
-        set_led_state(true);
-        ESP_LOGI(TAG, "LED set to ON from MQTT");
+        request_cycle_stop(false);
+        set_device_state(true);
+        ESP_LOGI(TAG, "Device output set to ON from MQTT");
         publish_status(client, "cmd_on");
         return;
     }
 
     if (strcasecmp(command, "off") == 0) {
-        set_led_state(false);
-        ESP_LOGI(TAG, "LED set to OFF from MQTT");
+        request_cycle_stop(false);
+        set_device_state(false);
+        ESP_LOGI(TAG, "Device output set to OFF from MQTT");
         publish_status(client, "cmd_off");
         return;
     }
 
     if (strcasecmp(command, "toggle") == 0) {
-        set_led_state(!s_led_is_on);
-        ESP_LOGI(TAG, "LED toggled from MQTT");
+        request_cycle_stop(false);
+        set_device_state(!s_device_is_on);
+        ESP_LOGI(TAG, "Device output toggled from MQTT");
         publish_status(client, "cmd_toggle");
         return;
     }
@@ -385,7 +652,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Starting Wi-Fi MQTT demo");
     ESP_LOGI(TAG, "Configure Wi-Fi credentials in menuconfig if needed");
 
-    configure_led();
+    configure_device_output();
     configure_static_sta_network();
     ESP_ERROR_CHECK(example_connect());
     print_current_lan_ip();

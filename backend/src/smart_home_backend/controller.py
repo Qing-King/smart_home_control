@@ -125,6 +125,50 @@ class MqttDeviceController:
         finally:
             self.disconnect()
 
+    def publish_command_payload(
+        self,
+        payload: str,
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        effective_timeout = timeout or self.settings.command_timeout
+
+        self.connect(timeout=effective_timeout)
+        try:
+            message_info = self._client.publish(
+                self.settings.command_topic,
+                payload=payload,
+                qos=1,
+                retain=False,
+            )
+            message_info.wait_for_publish(timeout=effective_timeout)
+
+            if message_info.rc != mqtt.MQTT_ERR_SUCCESS:
+                raise RuntimeError(f"MQTT 发布失败，错误码: {message_info.rc}")
+        finally:
+            self.disconnect()
+
+    def send_cycle_start(
+        self,
+        *,
+        total_seconds: float,
+        on_seconds: float,
+        off_seconds: float,
+        timeout: float | None = None,
+    ) -> None:
+        payload = "cycle:start:{total_ms}:{on_ms}:{off_ms}".format(
+            total_ms=max(1, round(total_seconds * 1000)),
+            on_ms=max(1, round(on_seconds * 1000)),
+            off_ms=max(1, round(off_seconds * 1000)),
+        )
+        self.publish_command_payload(payload, timeout=timeout)
+
+    def send_cycle_stop(self, *, timeout: float | None = None) -> None:
+        self.publish_command_payload("cycle:stop", timeout=timeout)
+
+    def send_cycle_cancel(self, *, timeout: float | None = None) -> None:
+        self.publish_command_payload("cycle:cancel", timeout=timeout)
+
     def _subscribe_status(self, timeout: float) -> None:
         self._subscribed.clear()
         self._subscribe_error = None

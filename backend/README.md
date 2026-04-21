@@ -13,6 +13,9 @@
 - Command topic: `<topic_root>/cmd`
 - Status topic: `<topic_root>/status`
 - 支持命令: `on`、`off`、`toggle`、`status`
+- 循环控制会额外向同一个命令主题下发 `cycle:start:<total_ms>:<on_ms>:<off_ms>`、`cycle:stop` 或 `cycle:cancel`，由 ESP8266 在本地计时执行
+- 设备端默认用 NodeMCU D1 / ESP8266 GPIO5 作为实际控制输出口；`on` 为高电平，`off` 为低电平
+- 板载 LED 默认用 GPIO2 作为同步指示灯；设备打开时 LED 亮，设备关闭时 LED 灭
 
 ## 目录说明
 
@@ -110,6 +113,9 @@ http://127.0.0.1:28681/
 - `GET /api/health`
 - `GET /api/device/status`
 - `POST /api/device/command`
+- `GET /api/cycle`
+- `POST /api/cycle/start`
+- `POST /api/cycle/stop`
 
 `POST /api/device/command` 示例：
 

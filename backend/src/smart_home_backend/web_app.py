@@ -96,10 +96,13 @@ def create_app() -> Flask:
 
         try:
             cycle_stop_requested = False
-            if command in {"on", "off", "toggle"}:
-                cycle_stop_requested = CYCLE_MANAGER.request_stop(skip_final_off=True)
-
             settings = MQTTSettings.from_env()
+            if command in {"on", "off", "toggle"}:
+                cycle_stop_requested = CYCLE_MANAGER.request_stop(
+                    skip_final_off=True,
+                    settings=settings,
+                )
+
             controller = MqttDeviceController(settings)
             status = controller.send_command(command, wait_for_status=wait_for_status)
             return (
@@ -142,17 +145,20 @@ def create_app() -> Flask:
 
     @app.post("/api/cycle/stop")
     def stop_cycle() -> tuple[dict[str, Any], int]:
-        stop_requested = CYCLE_MANAGER.request_stop()
-        return (
-            jsonify(
-                {
-                    "ok": True,
-                    "stop_requested": stop_requested,
-                    "cycle": CYCLE_MANAGER.get_status(),
-                }
-            ),
-            200,
-        )
+        try:
+            stop_requested = CYCLE_MANAGER.request_stop(settings=MQTTSettings.from_env())
+            return (
+                jsonify(
+                    {
+                        "ok": True,
+                        "stop_requested": stop_requested,
+                        "cycle": CYCLE_MANAGER.get_status(),
+                    }
+                ),
+                200,
+            )
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc), "cycle": CYCLE_MANAGER.get_status()}), 500
 
     @app.get("/")
     def index() -> Any:

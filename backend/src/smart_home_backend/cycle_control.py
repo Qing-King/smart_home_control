@@ -177,44 +177,61 @@ class LightCycleManager:
         lock = FileLock(LOCK_FILE)
         lock.acquire_nonblocking()
 
-        with self._thread_lock:
-            self._stop_event = threading.Event()
-            self._clear_signal_file()
+        try:
+            self._send_cycle_start(settings, request)
 
-            now = utc_now_epoch()
-            state = self._build_state(
-                request=request,
-                active=True,
-                status="running",
-                current_phase="on",
-                started_at=now,
-                phase_started_at=now,
-                next_switch_at=min(now + request.on_seconds, now + request.total_seconds),
-                ends_at=now + request.total_seconds,
-                heartbeat_at=now,
-                ended_at=None,
-                stop_requested=False,
-                stop_skip_final_off=False,
-                last_command="on",
-                last_error=None,
-            )
-            self._write_state(state)
+            with self._thread_lock:
+                self._stop_event = threading.Event()
+                self._clear_signal_file()
 
-            thread = threading.Thread(
-                target=self._run_cycle,
-                args=(request, settings, lock),
-                name="light-cycle-runner",
-                daemon=True,
-            )
-            self._thread = thread
-            thread.start()
+                now = utc_now_epoch()
+                state = self._build_state(
+                    request=request,
+                    active=True,
+                    status="running",
+                    current_phase="on",
+                    started_at=now,
+                    phase_started_at=now,
+                    next_switch_at=min(now + request.on_seconds, now + request.total_seconds),
+                    ends_at=now + request.total_seconds,
+                    heartbeat_at=now,
+                    ended_at=None,
+                    stop_requested=False,
+                    stop_skip_final_off=False,
+                    last_command="cycle:start",
+                    last_error=None,
+                )
+                self._write_state(state)
+
+                thread = threading.Thread(
+                    target=self._run_cycle,
+                    args=(request, lock),
+                    name="light-cycle-runner",
+                    daemon=True,
+                )
+                self._thread = thread
+                thread.start()
+        except Exception:
+            lock.release()
+            raise
 
         return self.get_status()
 
-    def request_stop(self, *, skip_final_off: bool = False) -> bool:
+    def request_stop(
+        self,
+        *,
+        skip_final_off: bool = False,
+        settings: MQTTSettings | None = None,
+    ) -> bool:
         state = self.get_status()
         if not state.get("active"):
             return False
+
+        if settings is not None:
+            if skip_final_off:
+                self._send_cycle_cancel(settings)
+            else:
+                self._send_cycle_stop(settings)
 
         payload = {
             "action": "stop",
@@ -230,7 +247,7 @@ class LightCycleManager:
         self._write_state(state)
         return True
 
-    def _run_cycle(self, request: CycleRequest, settings: MQTTSettings, lock: FileLock) -> None:
+    def _run_cycle(self, request: CycleRequest, lock: FileLock) -> None:
         current_phase = "on"
         status = "completed"
         last_error: str | None = None
@@ -238,7 +255,6 @@ class LightCycleManager:
         skip_final_off = False
 
         try:
-            self._send_command(settings, "on")
             started_at = utc_now_epoch()
             ends_at = started_at + request.total_seconds
             phase_started_at = started_at
@@ -257,7 +273,7 @@ class LightCycleManager:
                     ended_at=None,
                     stop_requested=False,
                     stop_skip_final_off=False,
-                    last_command="on",
+                    last_command="cycle:start",
                     last_error=None,
                 )
             )
@@ -281,7 +297,6 @@ class LightCycleManager:
                     break
 
                 current_phase = "off" if current_phase == "on" else "on"
-                self._send_command(settings, current_phase)
                 phase_started_at = ended_at
                 next_switch_at = min(
                     phase_started_at
@@ -302,22 +317,14 @@ class LightCycleManager:
                         ended_at=None,
                         stop_requested=False,
                         stop_skip_final_off=False,
-                        last_command=current_phase,
+                        last_command=f"cycle:{current_phase}",
                         last_error=None,
                     )
                 )
-
-            if not skip_final_off:
-                self._send_command(settings, "off")
         except Exception as exc:
             status = "failed"
             last_error = str(exc)
             ended_at = utc_now_epoch()
-            try:
-                if not skip_final_off:
-                    self._send_command(settings, "off")
-            except Exception:
-                pass
         finally:
             final_state = self.get_status()
             final_state.update(
@@ -330,7 +337,7 @@ class LightCycleManager:
                     "ended_at": ended_at,
                     "stop_requested": status == "stopped",
                     "stop_skip_final_off": skip_final_off,
-                    "last_command": None if skip_final_off else "off",
+                    "last_command": "cycle:cancel" if skip_final_off else "cycle:stop",
                 }
             )
             if last_error is not None:
@@ -361,9 +368,21 @@ class LightCycleManager:
 
             time.sleep(min(1.0, max(0.1, deadline - now)))
 
-    def _send_command(self, settings: MQTTSettings, command: str) -> None:
+    def _send_cycle_start(self, settings: MQTTSettings, request: CycleRequest) -> None:
         controller = MqttDeviceController(settings)
-        controller.send_command(command, wait_for_status=False)
+        controller.send_cycle_start(
+            total_seconds=request.total_seconds,
+            on_seconds=request.on_seconds,
+            off_seconds=request.off_seconds,
+        )
+
+    def _send_cycle_stop(self, settings: MQTTSettings) -> None:
+        controller = MqttDeviceController(settings)
+        controller.send_cycle_stop()
+
+    def _send_cycle_cancel(self, settings: MQTTSettings) -> None:
+        controller = MqttDeviceController(settings)
+        controller.send_cycle_cancel()
 
     def _load_state(self) -> dict[str, Any]:
         state = read_json_file(STATE_FILE)

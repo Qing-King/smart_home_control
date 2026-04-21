@@ -8,7 +8,10 @@
 - 通过 TLS 连接 MQTT Broker
 - 订阅 `<topic_root>/cmd`
 - 上报 `<topic_root>/status`
-- 根据 `on`、`off`、`toggle`、`status` 控制 NodeMCU 板载 LED
+- 根据 `on`、`off`、`toggle`、`status` 控制实际设备输出口
+- 默认使用 NodeMCU D1，也就是 ESP8266 GPIO5；`on` 输出高电平，`off` 输出低电平
+- 同时保留板载 LED 作为指示灯，默认使用 GPIO2；设备打开时 LED 亮，设备关闭时 LED 灭
+- 根据后端下发的循环参数在 ESP8266 本地执行开/关循环；参数收到后，即使 MQTT/Wi-Fi 之后断开，也会继续按本地计时执行到结束
 
 ## 和后端的对应关系
 
@@ -51,6 +54,7 @@
    - `Example Connection Configuration` > `WiFi SSID`
    - `Example Connection Configuration` > `WiFi Password`
    - `WiFi MQTT Demo Network Configuration`
+   - `WiFi MQTT Demo Device Output Configuration`
    - `WiFi MQTT Demo MQTT Configuration`
    - `Serial flasher config` > `Default serial port`
 
@@ -90,5 +94,8 @@
    - `off`
    - `toggle`
    - `status`
+   - `cycle:start:<total_ms>:<on_ms>:<off_ms>`
+   - `cycle:stop`
+   - `cycle:cancel`
 
 串口日志里能看到 MQTT 事件，设备也会向 `<topic_root>/status` 回传状态 JSON。

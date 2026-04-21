@@ -20,6 +20,53 @@ const cycleNextSwitch = document.getElementById("cycle-next-switch");
 const cycleStartedAt = document.getElementById("cycle-started-at");
 const cycleEndsAt = document.getElementById("cycle-ends-at");
 const apiBaseUrl = new URL("api/", window.location.href);
+const cycleSettingsStorageKey = "smartHomeCycleSettings";
+const cycleSettingInputs = [cycleTotalHours, cycleOnMinutes, cycleOffMinutes];
+
+function getCycleSettingsPayload() {
+  return {
+    total_hours: cycleTotalHours.value,
+    on_minutes: cycleOnMinutes.value,
+    off_minutes: cycleOffMinutes.value,
+  };
+}
+
+function saveCycleSettings() {
+  try {
+    window.localStorage.setItem(
+      cycleSettingsStorageKey,
+      JSON.stringify(getCycleSettingsPayload())
+    );
+  } catch (error) {
+    console.warn("Unable to save cycle settings", error);
+  }
+}
+
+function restoreCycleSettings() {
+  let savedSettings = null;
+
+  try {
+    savedSettings = JSON.parse(window.localStorage.getItem(cycleSettingsStorageKey));
+  } catch (error) {
+    console.warn("Unable to restore cycle settings", error);
+  }
+
+  if (!savedSettings || typeof savedSettings !== "object") {
+    return;
+  }
+
+  if (savedSettings.total_hours) {
+    cycleTotalHours.value = savedSettings.total_hours;
+  }
+
+  if (savedSettings.on_minutes) {
+    cycleOnMinutes.value = savedSettings.on_minutes;
+  }
+
+  if (savedSettings.off_minutes) {
+    cycleOffMinutes.value = savedSettings.off_minutes;
+  }
+}
 
 function setBusy(isBusy) {
   refreshButton.disabled = isBusy;
@@ -100,11 +147,11 @@ function formatDuration(seconds) {
 
 function formatCyclePhase(phase) {
   if (phase === "on") {
-    return "亮灯中";
+    return "设备打开中";
   }
 
   if (phase === "off") {
-    return "灭灯中";
+    return "设备关闭中";
   }
 
   return "-";
@@ -212,11 +259,8 @@ async function fetchCycleStatus({ showLog = false } = {}) {
 async function startCycle() {
   setBusy(true);
   try {
-    const payload = {
-      total_hours: cycleTotalHours.value,
-      on_minutes: cycleOnMinutes.value,
-      off_minutes: cycleOffMinutes.value,
-    };
+    const payload = getCycleSettingsPayload();
+    saveCycleSettings();
     const data = await callApi(new URL("cycle/start", apiBaseUrl), {
       method: "POST",
       body: JSON.stringify(payload),
@@ -263,6 +307,12 @@ commandButtons.forEach((button) => {
   });
 });
 
+cycleSettingInputs.forEach((input) => {
+  input.addEventListener("input", saveCycleSettings);
+  input.addEventListener("change", saveCycleSettings);
+});
+
+restoreCycleSettings();
 fetchStatus();
 fetchCycleStatus();
 window.setInterval(() => {

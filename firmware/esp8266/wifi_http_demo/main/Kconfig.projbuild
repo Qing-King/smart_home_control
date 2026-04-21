@@ -30,19 +30,35 @@ menu "WiFi MQTT Demo Network Configuration"
             Backup DNS server used when DHCP is disabled.
 endmenu
 
-menu "WiFi MQTT Demo LED Configuration"
-    config WIFI_HTTP_DEMO_LED_GPIO
-        int "LED GPIO"
+menu "WiFi MQTT Demo Device Output Configuration"
+    config WIFI_HTTP_DEMO_DEVICE_GPIO
+        int "Device output GPIO"
+        range 0 16
+        default 5
+        help
+            GPIO used to control the real device output.
+            For ESP8266 NodeMCU boards, D1 maps to GPIO5 and is a good general-purpose output
+            because it is not one of the boot strap pins.
+
+    config WIFI_HTTP_DEMO_DEVICE_ACTIVE_LOW
+        bool "Device output is active low"
+        default n
+        help
+            Enable this if your relay or driver turns on when the GPIO output is low.
+
+    config WIFI_HTTP_DEMO_INDICATOR_LED_GPIO
+        int "Indicator LED GPIO"
         range 0 16
         default 2
         help
-            GPIO used for the NodeMCU onboard LED. Many ESP8266 NodeMCU boards use GPIO2.
+            GPIO used for the visual indicator LED.
+            Many ESP8266 NodeMCU boards use GPIO2 for the onboard LED.
 
-    config WIFI_HTTP_DEMO_LED_ACTIVE_LOW
-        bool "LED is active low"
+    config WIFI_HTTP_DEMO_INDICATOR_LED_ACTIVE_LOW
+        bool "Indicator LED is active low"
         default y
         help
-            Enable this if the LED turns on when the GPIO output is low.
+            Enable this if the indicator LED turns on when the GPIO output is low.
 endmenu
 
 menu "WiFi MQTT Demo MQTT Configuration"
