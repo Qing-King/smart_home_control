@@ -53,6 +53,64 @@
         </dl>
       </section>
 
+      <section class="panel controls">
+        <div class="panel-head">
+          <h2>循环控制</h2>
+          <button id="cycle-refresh-button" class="button ghost" type="button">刷新循环状态</button>
+        </div>
+
+        <p class="form-tip">
+          启动后会先亮灯，再按“亮灯时长 / 灭灯时长”持续循环，到总时长结束后自动关灯。
+        </p>
+
+        <div class="cycle-form-grid">
+          <label class="field">
+            <span>控制总时长（小时）</span>
+            <input id="cycle-total-hours" type="number" min="0.1" step="0.1" value="8" />
+          </label>
+          <label class="field">
+            <span>亮灯时长（分钟）</span>
+            <input id="cycle-on-minutes" type="number" min="0.1" step="0.1" value="5" />
+          </label>
+          <label class="field">
+            <span>灭灯时长（分钟）</span>
+            <input id="cycle-off-minutes" type="number" min="0.1" step="0.1" value="1" />
+          </label>
+        </div>
+
+        <div class="button-row">
+          <button id="cycle-start-button" class="button primary" type="button">启动循环</button>
+          <button id="cycle-stop-button" class="button danger" type="button">停止循环</button>
+        </div>
+
+        <dl class="info-grid cycle-info-grid">
+          <div>
+            <dt>循环状态</dt>
+            <dd id="cycle-status">未启动</dd>
+          </div>
+          <div>
+            <dt>当前阶段</dt>
+            <dd id="cycle-phase">-</dd>
+          </div>
+          <div>
+            <dt>剩余时间</dt>
+            <dd id="cycle-remaining">-</dd>
+          </div>
+          <div>
+            <dt>下次切换</dt>
+            <dd id="cycle-next-switch">-</dd>
+          </div>
+          <div>
+            <dt>开始时间</dt>
+            <dd id="cycle-started-at">-</dd>
+          </div>
+          <div>
+            <dt>结束时间</dt>
+            <dd id="cycle-ends-at">-</dd>
+          </div>
+        </dl>
+      </section>
+
       <section class="panel log-panel">
         <div class="panel-head">
           <h2>返回日志</h2>

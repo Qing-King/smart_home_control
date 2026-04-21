@@ -108,7 +108,7 @@ class WebSettings:
     def from_env(cls) -> "WebSettings":
         load_env_file()
         return cls(
-            host=os.getenv("WEB_HOST", "0.0.0.0").strip() or "0.0.0.0",
+            host=os.getenv("WEB_HOST", "127.0.0.1").strip() or "127.0.0.1",
             port=int(os.getenv("WEB_PORT", "28681")),
             debug=read_bool_env("WEB_DEBUG", False),
             proxy_fix=read_bool_env("WEB_PROXY_FIX", True),

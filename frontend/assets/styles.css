@@ -117,6 +117,13 @@ h1 {
   margin-top: 20px;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 18px;
+}
+
 .button {
   appearance: none;
   border: 0;
@@ -174,6 +181,52 @@ h1 {
   background: rgba(255, 255, 255, 0.74);
 }
 
+.cycle-info-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cycle-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.field span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.field input {
+  width: 100%;
+  border: 1px solid rgba(111, 101, 84, 0.18);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font: inherit;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.field input:focus {
+  outline: 2px solid rgba(13, 122, 95, 0.18);
+  border-color: rgba(13, 122, 95, 0.4);
+}
+
+.form-tip {
+  margin: 16px 0 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
 dt {
   font-size: 13px;
   color: var(--muted);
@@ -201,7 +254,9 @@ dd {
 
 @media (max-width: 780px) {
   .button-grid,
-  .info-grid {
+  .info-grid,
+  .cycle-form-grid,
+  .cycle-info-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -225,7 +280,13 @@ dd {
   }
 
   .button-grid,
-  .info-grid {
+  .info-grid,
+  .cycle-form-grid,
+  .cycle-info-grid {
     grid-template-columns: 1fr;
+  }
+
+  .button-row .button {
+    width: 100%;
   }
 }

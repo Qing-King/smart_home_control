@@ -7,10 +7,26 @@ const deviceReason = document.getElementById("device-reason");
 const deviceClientId = document.getElementById("device-client-id");
 const refreshButton = document.getElementById("refresh-button");
 const commandButtons = document.querySelectorAll("[data-command]");
+const cycleRefreshButton = document.getElementById("cycle-refresh-button");
+const cycleStartButton = document.getElementById("cycle-start-button");
+const cycleStopButton = document.getElementById("cycle-stop-button");
+const cycleTotalHours = document.getElementById("cycle-total-hours");
+const cycleOnMinutes = document.getElementById("cycle-on-minutes");
+const cycleOffMinutes = document.getElementById("cycle-off-minutes");
+const cycleStatus = document.getElementById("cycle-status");
+const cyclePhase = document.getElementById("cycle-phase");
+const cycleRemaining = document.getElementById("cycle-remaining");
+const cycleNextSwitch = document.getElementById("cycle-next-switch");
+const cycleStartedAt = document.getElementById("cycle-started-at");
+const cycleEndsAt = document.getElementById("cycle-ends-at");
 const apiBaseUrl = new URL("api/", window.location.href);
 
 function setBusy(isBusy) {
   refreshButton.disabled = isBusy;
+  cycleRefreshButton.disabled = isBusy;
+  cycleStartButton.disabled = isBusy;
+  cycleStopButton.disabled = isBusy;
+
   commandButtons.forEach((button) => {
     button.disabled = isBusy;
   });
@@ -41,6 +57,90 @@ function updateDeviceInfo(response) {
   deviceIp.textContent = parsed.ip ?? "-";
   deviceReason.textContent = parsed.reason ?? "-";
   deviceClientId.textContent = parsed.client_id ?? "-";
+}
+
+function formatDateTime(timestamp) {
+  if (!timestamp) {
+    return "-";
+  }
+
+  const date = new Date(timestamp * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatDuration(seconds) {
+  if (!seconds || seconds <= 0) {
+    return "0 秒";
+  }
+
+  const totalSeconds = Math.round(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainSeconds = totalSeconds % 60;
+  const parts = [];
+
+  if (hours > 0) {
+    parts.push(`${hours} 小时`);
+  }
+
+  if (minutes > 0) {
+    parts.push(`${minutes} 分钟`);
+  }
+
+  if (remainSeconds > 0 || parts.length === 0) {
+    parts.push(`${remainSeconds} 秒`);
+  }
+
+  return parts.join(" ");
+}
+
+function formatCyclePhase(phase) {
+  if (phase === "on") {
+    return "亮灯中";
+  }
+
+  if (phase === "off") {
+    return "灭灯中";
+  }
+
+  return "-";
+}
+
+function formatCycleStatus(cycle) {
+  if (!cycle) {
+    return "未启动";
+  }
+
+  if (cycle.active) {
+    return "运行中";
+  }
+
+  if (cycle.status === "completed") {
+    return "已完成";
+  }
+
+  if (cycle.status === "stopped") {
+    return "已停止";
+  }
+
+  if (cycle.status === "failed") {
+    return "执行失败";
+  }
+
+  return "未启动";
+}
+
+function updateCycleInfo(cycle) {
+  cycleStatus.textContent = formatCycleStatus(cycle);
+  cyclePhase.textContent = formatCyclePhase(cycle?.current_phase);
+  cycleRemaining.textContent = cycle?.active ? formatDuration(cycle.remaining_seconds) : "-";
+  cycleNextSwitch.textContent = cycle?.active ? formatDateTime(cycle.next_switch_at) : "-";
+  cycleStartedAt.textContent = formatDateTime(cycle?.started_at);
+  cycleEndsAt.textContent = formatDateTime(cycle?.ends_at);
 }
 
 async function callApi(url, options = {}) {
@@ -84,6 +184,7 @@ async function sendCommand(command) {
     });
     setStatusPill(true, `命令 ${command} 已发送`);
     updateDeviceInfo(data);
+    updateCycleInfo(data.cycle);
     writeLog(data);
   } catch (error) {
     setStatusPill(false, `命令失败: ${error.message}`);
@@ -93,7 +194,69 @@ async function sendCommand(command) {
   }
 }
 
+async function fetchCycleStatus({ showLog = false } = {}) {
+  try {
+    const data = await callApi(new URL("cycle", apiBaseUrl));
+    updateCycleInfo(data.cycle);
+
+    if (showLog) {
+      writeLog(data);
+    }
+  } catch (error) {
+    if (showLog) {
+      writeLog({ ok: false, cycle: true, error: error.message });
+    }
+  }
+}
+
+async function startCycle() {
+  setBusy(true);
+  try {
+    const payload = {
+      total_hours: cycleTotalHours.value,
+      on_minutes: cycleOnMinutes.value,
+      off_minutes: cycleOffMinutes.value,
+    };
+    const data = await callApi(new URL("cycle/start", apiBaseUrl), {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    updateCycleInfo(data.cycle);
+    setStatusPill(true, "循环任务已启动");
+    writeLog(data);
+  } catch (error) {
+    setStatusPill(false, `启动循环失败: ${error.message}`);
+    writeLog({ ok: false, action: "cycle_start", error: error.message });
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function stopCycle() {
+  setBusy(true);
+  try {
+    const data = await callApi(new URL("cycle/stop", apiBaseUrl), {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    updateCycleInfo(data.cycle);
+    setStatusPill(true, data.stop_requested ? "循环任务停止中" : "当前没有运行中的循环");
+    writeLog(data);
+  } catch (error) {
+    setStatusPill(false, `停止循环失败: ${error.message}`);
+    writeLog({ ok: false, action: "cycle_stop", error: error.message });
+  } finally {
+    setBusy(false);
+  }
+}
+
 refreshButton.addEventListener("click", fetchStatus);
+cycleRefreshButton.addEventListener("click", () => {
+  fetchCycleStatus({ showLog: true });
+});
+cycleStartButton.addEventListener("click", startCycle);
+cycleStopButton.addEventListener("click", stopCycle);
+
 commandButtons.forEach((button) => {
   button.addEventListener("click", () => {
     sendCommand(button.dataset.command);
@@ -101,3 +264,7 @@ commandButtons.forEach((button) => {
 });
 
 fetchStatus();
+fetchCycleStatus();
+window.setInterval(() => {
+  fetchCycleStatus();
+}, 10000);
